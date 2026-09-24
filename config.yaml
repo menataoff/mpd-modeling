@@ -1,0 +1,123 @@
+physics:
+  gamma: 1.67
+  beta:  0.05
+  H_z0:  0.25
+
+time:
+  T:  10.0
+  dt: 0.0000125
+
+adaptive_dt:
+  enabled:       false
+  cfl_number:    0.5
+  growth_factor: 1.10
+  dt_min:        1.0e-10
+  dt_max:        2.5e-5
+
+convergence:
+  threshold:       1.0e-7
+  check_frequency: 100
+
+output:
+  directory: output
+  run_name:  run
+  vtk_step:  50000000
+
+parallel:
+  openmp_threads: 0
+  mpi_dims_l: 0
+  mpi_dims_m: 0
+
+grid:
+  L_max: 1600
+  M_max: 800
+
+# ── Diagnostics ──────────────────────────────────────────────────────────────
+diagnostics:
+  cfl_check:            false
+  conserved_integrals:  false
+  console_checkpoint:   true 
+  outlet_diagnostics:   true
+  startup_verification: false
+  write_mpi_rank:       false
+
+
+# ── Geometry ─────────────────────────────────────────────────────────────────
+geometry:
+  type: short_cathode_parabolic
+  params:
+    z_flat_end:   0.300
+    z_throat:     0.400
+    z_thin_start: 0.478
+    r_flat:       0.200
+    r_thin:       0.005
+    r_outer:      0.800
+
+# ── Initial conditions ────────────────────────────────────────────────────────
+initial_conditions:
+  rho:   1.0
+  v_z:   0.1
+  v_r:   0.1
+  v_phi: 0.0
+  H_z:   H_z0
+  H_r:   "H_z * r_z"
+  H_phi: "(1 - 0.9 * z) * r_0 / r"
+  e:     "beta / (2 * (gamma - 1))"
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+boundary_conditions:
+
+  # ── Inlet (z = 0) ────────────────────────────────────────────────────────
+  l_lo:
+    - rho:   { dirichlet: 1.0 }
+      v_z:   "rho_nb * v_z_nb * r_nb / (rho * r)"
+      v_r:   { dirichlet: 0.0 }
+      v_phi: { dirichlet: 0.0 }
+      e:     "beta / (2 * (gamma - 1)) * pow(rho, gamma - 1)"
+      H_z:   "H_z0"
+      H_r:   { dirichlet: 0.0 }
+      H_phi: "r_0 / r"
+
+  # ── Outlet (z = L) ───────────────────────────────────────────────────────
+  l_hi:
+    - rho:   neumann
+      v_z:   neumann
+      v_r:   neumann
+      v_phi: neumann
+      e:     neumann
+      H_z:   neumann
+      H_r:   neumann
+      H_phi: neumann
+
+  # ── Outer wall (r = r_outer) ─────────────────────────────────────────────
+  m_hi:
+    - rho:   neumann
+      v_z:   neumann
+      v_r:   "v_z * r_z"
+      v_phi: neumann
+      e:     neumann
+      H_z:   neumann
+      H_r:   "H_z * r_z"
+      H_phi: neumann
+
+  # ── Inner wall + axis (r = r_inner, then axis of symmetry) ───────────────
+  m_lo:
+    - range: [0, 640]
+      rho:   neumann
+      v_z:   neumann
+      v_r:   "v_z_nb * r_z_nb"
+      v_phi: neumann
+      e:     neumann
+      H_z:   neumann
+      H_r:   "H_z_nb * r_z_nb"
+      H_phi: neumann
+
+    - range: [641, -1]
+      rho:   axis_lf
+      v_z:   axis_lf
+      v_r:   { dirichlet: 0.0 }
+      v_phi: { dirichlet: 0.0 }
+      e:     axis_lf
+      H_z:   axis_lf
+      H_r:   { dirichlet: 0.0 }
+      H_phi: { dirichlet: 0.0 }

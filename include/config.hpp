@@ -1,0 +1,192 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "field_condition.hpp"
+
+// ============================================================
+// Geometry configuration
+// ============================================================
+
+/// Runtime configuration for the channel geometry.
+/// `type`        maps to a name registered in GeometryRegistry.
+/// `params_yaml` holds the raw YAML text of the optional `params` sub-node,
+///               which is parsed and forwarded to the geometry factory.
+struct GeometryConfig {
+    std::string type = "short_cathode_cosine";
+    std::string params_yaml;   ///< empty → no params; factory receives a null node
+};
+
+// ============================================================
+// Initial-condition configuration
+// ============================================================
+
+/// Configuration for the initial condition.
+///
+/// Two mutually exclusive modes:
+///
+///   VTK restart
+///     Set vtk_file to a non-empty path.  VtkIC reads the structured-grid
+///     VTK file written by IOManager::WriteFrame and interpolates all eight
+///     physical fields onto the current computational grid.
+///
+///     YAML:
+///       initial_conditions:
+///         vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
+///
+///   Expression IC (default when vtk_file is empty)
+///     params_yaml holds the raw YAML text of the initial_conditions node,
+///     forwarded to ExpressionIC.  Any field not specified falls back to the
+///     built-in defaults (rho=1, v_z=0, …).
+///
+/// When vtk_file is set, any expression fields listed alongside it are
+/// silently ignored — VTK data takes full precedence.
+struct ICConfig {
+    std::string vtk_file;      ///< non-empty → use VtkIC; empty → use ExpressionIC
+    std::string params_yaml;   ///< ExpressionIC only; empty → all built-in defaults
+};
+
+// ============================================================
+// Boundary-condition configuration
+// ============================================================
+
+/// Per-field boundary-condition specification for one contiguous segment of a face.
+///
+/// global_lo / global_hi are indices along the face's *free* axis in global
+/// coordinates (l for M faces, m for L faces).  A negative value is a
+/// sentinel meaning "use the face's natural start/end":
+///
+///   global_lo < 0  →  0                        (first cell on the face)
+///   global_hi < 0  →  L_max-1 or M_max  (last cell on the face)
+///
+/// Each physical field has an independent FieldCond.  Unspecified fields
+/// default to Neumann (zero-gradient).
+///
+/// Example YAML for a solid inner wall:
+///
+///   m_lo:
+///     - range: [0, 260]
+///       rho:   neumann
+///       v_z:   neumann
+///       v_r:   wall_tangent
+///       v_phi: { dirichlet: 0.0 }
+///       e:     neumann
+///       H_z:   neumann
+///       H_r:   wall_tangent
+///       H_phi: neumann
+///
+/// Example YAML for the axis-of-symmetry region:
+///
+///   m_lo:
+///     - range: [261, -1]
+///       rho:   axis_lf
+///       v_z:   axis_lf
+///       v_r:   { dirichlet: 0.0 }
+///       v_phi: { dirichlet: 0.0 }
+///       e:     axis_lf
+///       H_z:   axis_lf
+///       H_r:   { dirichlet: 0.0 }
+///       H_phi: { dirichlet: 0.0 }
+struct BCSegmentConfig {
+    int global_lo = -1;   ///< negative → face start
+    int global_hi = -1;   ///< negative → face end
+
+    // Per-field conditions — all default to Neumann.
+    FieldCond rho;
+    FieldCond v_z;
+    FieldCond v_r;
+    FieldCond v_phi;
+    FieldCond e;
+    FieldCond H_z;
+    FieldCond H_r;
+    FieldCond H_phi;
+};
+
+/// All segments for one face (l_lo, l_hi, m_lo, or m_hi).
+struct BCFaceConfig {
+    std::vector<BCSegmentConfig> segments;
+};
+
+// ============================================================
+// SimConfig
+// ============================================================
+
+/// All tuneable parameters for the MHD simulation.
+///
+/// Primary source is config.yaml (loaded via SimConfig::Load()).
+/// Derived quantities (dz, dy) are computed automatically after loading.
+struct SimConfig {
+    // ---- physics ----
+    double gamma = 1.67;
+    double beta  = 0.05;
+    double H_z0  = 0.25;
+
+    // ---- time integration ----
+    double T  = 0.5;
+    double dt = 0.000025;   ///< initial (and fixed) time step when adaptive_dt = false
+
+    // ---- adaptive time step -----------------------------------------------
+    bool   adaptive_dt      = false;
+    double cfl_number       = 0.5;
+    double dt_growth_factor = 1.1;
+    double dt_min           = 1.0e-9;
+    double dt_max           = 1.0e-3;
+
+    // ---- global grid ----
+    int L_max = 800;
+    int M_max = 400;
+
+    // ---- convergence ----
+    double convergence_threshold = 0.0;   ///< 0 → disabled
+    int    check_frequency       = 100;
+
+    // ---- output ----
+    std::string output_dir = "output";
+    std::string run_name   = "run";
+    int         vtk_step   = 100;
+
+    // ---- parallelism ----
+    int openmp_threads = 0;
+    int mpi_dims_l     = 0;
+    int mpi_dims_m     = 0;
+
+    // ---- geometry ----
+    GeometryConfig geometry;
+
+    // ---- initial conditions ----
+    ICConfig initial_conditions;
+
+    // ---- boundary conditions (one BCFaceConfig per Cartesian face) ----
+    BCFaceConfig bc_l_lo;   ///< z = 0  face (inflow by default)
+    BCFaceConfig bc_l_hi;   ///< z = L  face (outflow by default)
+    BCFaceConfig bc_m_lo;   ///< r = inner face (wall + axis by default)
+    BCFaceConfig bc_m_hi;   ///< r = outer face (wall by default)
+
+    // ---- diagnostics (purely observational; safe to disable for perf) -----
+    /// Per-feature toggles for the five overhead-only diagnostic groups.
+    /// Defaults preserve historical behaviour (everything ON).  Set any
+    /// flag to false to skip the corresponding work; flipping all of them
+    /// to false eliminates every MPI reduction and console print that
+    /// exists solely for observability.
+    struct DiagnosticsConfig {
+        bool cfl_check             = true;   ///< Diagnostics::CheckCfl every 100 steps
+        bool conserved_integrals   = true;   ///< Verification::ComputeIntegrals/PrintIntegrals every 1000 steps + final ReportDrift
+        bool console_checkpoint    = true;   ///< Per-1000-step (t, dt, rho, v_z, ...) row
+        bool outlet_diagnostics    = true;   ///< Final GetMassFlux / GetThrust
+        bool startup_verification  = true;   ///< CheckGhostExchange + CheckRadialSymmetry + initial integrals snapshot
+        bool write_mpi_rank        = true;   ///< Add "MPI_Rank" scalar array to VTK frames
+    } diagnostics;
+
+    // ---- derived (computed by load / init) ----
+    double dz{};
+    double dy{};
+
+    SimConfig() { Init(); }
+
+    /// Load all parameters from a YAML file and compute derived quantities.
+    void Load(const std::string& path = "config.yaml");
+
+private:
+    void Init();
+};

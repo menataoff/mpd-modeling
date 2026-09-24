@@ -1,0 +1,8 @@
+.direnv
+.cache
+*.log
+.envrc
+build/*
+results/*
+output/*
+log/*
