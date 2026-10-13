@@ -43,9 +43,9 @@ VillaniMPDTGeometry::VillaniMPDTGeometry(const YAML::Node& node)
         throw std::runtime_error(
             "VillaniMPDTGeometry: r_anode must be greater than r_cathode");
 
-    if (p_.r_outer_domain <= p_.r_anode)
+    if (p_.r_outer_domain < p_.r_anode)
         throw std::runtime_error(
-            "VillaniMPDTGeometry: r_outer_domain must be greater than r_anode");
+            "VillaniMPDTGeometry: r_outer_domain must be greater than or equal to r_anode");
 
     if (p_.z_anode <= 0.0 || p_.z_anode >= 1.0)
         throw std::runtime_error(

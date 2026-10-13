@@ -377,6 +377,39 @@ void SimConfig::Load(const std::string& path) {
         if (n["m_hi"]) bc_m_hi = ParseFace(n["m_hi"]);
     }
 
+    // ---- internal cathode-step boundary (G4) -----------------------------
+    if (auto n = cfg["internal_step_boundary"]) {
+        internal_step_boundary.enabled = n["enabled"] ? n["enabled"].as<bool>() : true;
+        if (n["z"])           internal_step_boundary.z           = n["z"].as<double>();
+        if (n["radius"])      internal_step_boundary.radius      = n["radius"].as<double>();
+        if (n["mode"])        internal_step_boundary.mode        = n["mode"].as<std::string>();
+        if (n["rho"])         internal_step_boundary.rho         = n["rho"].as<double>();
+        if (n["v_z"])         internal_step_boundary.v_z         = n["v_z"].as<double>();
+        if (n["e"])           internal_step_boundary.e           = n["e"].as<double>();
+        if (n["H_phi_edge"])  internal_step_boundary.H_phi_edge  = n["H_phi_edge"].as<double>();
+
+        const auto& g4 = internal_step_boundary;
+        if (g4.enabled) {
+            if (!(g4.z > 0.0 && g4.z < 1.0)) {
+                throw std::runtime_error(
+                    "config: internal_step_boundary.z must be strictly between 0 and 1");
+            }
+            if (g4.radius <= 0.0) {
+                throw std::runtime_error(
+                    "config: internal_step_boundary.radius must be positive");
+            }
+            if (g4.mode != "wall" && g4.mode != "inlet") {
+                throw std::runtime_error(
+                    "config: internal_step_boundary.mode must be 'wall' or 'inlet'");
+            }
+            if (g4.mode == "inlet" &&
+                (g4.rho <= 0.0 || g4.v_z <= 0.0 || g4.e <= 0.0)) {
+                throw std::runtime_error(
+                    "config: an inlet internal_step_boundary requires rho, v_z and e > 0");
+            }
+        }
+    }
+
     // ---- derived quantities ------------------------------------------------
     Init();
 }

@@ -109,6 +109,33 @@ struct BCFaceConfig {
 };
 
 // ============================================================
+// Internal step boundary configuration
+// ============================================================
+
+/// A vertical boundary at the abrupt cathode step (G4).
+///
+/// The four FaceBC objects only cover the outer rectangular faces of the
+/// computational mesh.  A sharp cathode tip creates one additional, internal
+/// face.  This configuration describes the physical state prescribed on that
+/// face.  The Solver applies it to the first fluid row immediately downstream
+/// of z, while preserving its central Lax--Friedrichs update everywhere else.
+struct InternalStepBoundaryConfig {
+    bool enabled = false;
+    double z = 0.0;       ///< axial position of the step, in 0..1 coordinates
+    double radius = 0.0;  ///< G4 radius, normally equal to the cathode radius
+
+    /// "wall"  : closed cathode end face, v_z = 0.
+    /// "inlet" : prescribed gas state enters in the positive z direction.
+    std::string mode = "wall";
+
+    // Prescribed inlet state.  Used only for mode == "inlet".
+    double rho = 1.0;
+    double v_z = 0.0;
+    double e = 0.0;
+    double H_phi_edge = 0.0;  ///< H_phi at r = radius; profile is linear to axis
+};
+
+// ============================================================
 // SimConfig
 // ============================================================
 
@@ -162,6 +189,9 @@ struct SimConfig {
     BCFaceConfig bc_l_hi;   ///< z = L  face (outflow by default)
     BCFaceConfig bc_m_lo;   ///< r = inner face (wall + axis by default)
     BCFaceConfig bc_m_hi;   ///< r = outer face (wall by default)
+
+    // ---- internal cathode-step face (G4) --------------------------------
+    InternalStepBoundaryConfig internal_step_boundary;
 
     // ---- diagnostics (purely observational; safe to disable for perf) -----
     /// Per-feature toggles for the five overhead-only diagnostic groups.

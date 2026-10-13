@@ -4,6 +4,8 @@
 #include <cmath>
 #include <utility>
 
+#include "physics_utils.hpp"
+
 // ============================================================
 // Constructor — build FaceBC objects from config, cache
 // invariant grid pointers and per-rank LF boundary offsets.
@@ -27,6 +29,17 @@ Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
     // once so the per-step kernel doesn't pay for Raw()/data() each call.
     r_ptr_  = grid_.r.Raw();
     dr_ptr_ = grid_.dr.data();
+
+    // The sharp step belongs to the first grid row whose axial coordinate is
+    // at or to the right of z_G4.  That row is treated as an internal
+    // boundary, just as l=1 is treated as the ordinary inlet boundary.
+    if (cfg_.internal_step_boundary.enabled) {
+        const int g4_l_global = static_cast<int>(
+            std::ceil(cfg_.internal_step_boundary.z / cfg_.dz - 1.0e-12));
+        if (g4_l_global >= mpi_.l_start && g4_l_global <= mpi_.l_end) {
+            g4_l_local_ = g4_l_global - mpi_.l_start + 1;
+        }
+    }
 }
 
 // ============================================================
@@ -110,6 +123,7 @@ void Solver::Advance(double dt) {
     bc_m_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_l_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
+    ApplyInternalStepBoundary();
 
     // ---- 7. Reconstruct only the boundary strips the FaceBCs just touched -
     ReconstructBCBoundaryStrips();
@@ -215,6 +229,59 @@ void Solver::ReconstructBCBoundaryStrips() {
     }
     if (mpi_.IsMHiBoundary()) {
         f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
+    }
+}
+
+// ============================================================
+// Internal G4 boundary at the sharp cathode step
+// ============================================================
+
+void Solver::ApplyInternalStepBoundary() {
+    const auto& g4 = cfg_.internal_step_boundary;
+    if (!g4.enabled || g4_l_local_ < 1 || g4_l_local_ > mpi_.local_L) return;
+
+    const int l = g4_l_local_;
+
+    // Wall mode needs the immediately downstream physical state for its
+    // zero-normal-gradient fields.  For the single-rank and the production
+    // configurations supplied with this work l+1 is owned locally.  If G4
+    // happens to lie on an MPI partition edge, fall back to the current
+    // physical strip: the inlet case remains fully prescribed either way.
+    const bool have_downstream_row = (l + 1 <= mpi_.local_L);
+    if (g4.mode == "wall" && have_downstream_row) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, l + 1, l + 1, 1, mpi_.local_M);
+    }
+
+    for (int m = 1; m <= mpi_.local_M; ++m) {
+        const double r = grid_.r[l][m];
+        if (r > g4.radius + 0.5 * grid_.dr[l]) continue;
+
+        if (g4.mode == "inlet") {
+            f_.rho[l][m]   = g4.rho;
+            f_.v_z[l][m]   = g4.v_z;
+            f_.v_r[l][m]   = 0.0;
+            f_.v_phi[l][m] = 0.0;
+            f_.e[l][m]     = g4.e;
+            f_.H_z[l][m]   = 0.0;
+            f_.H_r[l][m]   = 0.0;
+
+            // Regular axisymmetric self-field: H_phi is linear close to
+            // r=0 and therefore exactly zero on the axis.
+            f_.H_phi[l][m] =
+                g4.H_phi_edge * std::min(1.0, std::max(0.0, r / g4.radius));
+        } else {
+            const int ln = have_downstream_row ? l + 1 : l;
+            f_.rho[l][m]   = f_.rho[ln][m];
+            f_.v_z[l][m]   = 0.0;
+            f_.v_r[l][m]   = f_.v_r[ln][m];
+            f_.v_phi[l][m] = f_.v_phi[ln][m];
+            f_.e[l][m]     = f_.e[ln][m];
+            f_.H_z[l][m]   = 0.0;
+            f_.H_r[l][m]   = 0.0;
+            f_.H_phi[l][m] = f_.H_phi[ln][m];
+        }
+
+        RebuildUFromPhysical(f_, grid_, l, m);
     }
 }
 

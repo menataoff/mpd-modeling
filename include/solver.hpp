@@ -72,6 +72,11 @@ private:
     const double** r_ptr_{nullptr};  ///< grid_.r.Raw()   — bound once
     const double*  dr_ptr_{nullptr}; ///< grid_.dr.data() — bound once
 
+    // ---- optional internal cathode-step boundary (G4) --------------------
+    /// Local l index of the first row downstream of the sharp step.
+    /// -1 means that this MPI rank does not own the G4 row.
+    int g4_l_local_{-1};
+
     // ---- sub-steps ----
     void PostGhostExchange();
     void FinishGhostExchange();
@@ -87,4 +92,12 @@ private:
     /// output for the next step's neighbour reads (at corner cells) and
     /// for diagnostics that may run immediately after Advance().
     void ReconstructBCBoundaryStrips();
+
+    /// Apply the prescribed G4 state after the LF update.
+    ///
+    /// Only the part 0 <= r <= internal_step_boundary.radius of the row is
+    /// touched.  In wall mode it is a closed vertical cathode end face; in
+    /// inlet mode it is the gas source under the cathode.  The surrounding
+    /// fluid still uses the unmodified central LF kernel.
+    void ApplyInternalStepBoundary();
 };
